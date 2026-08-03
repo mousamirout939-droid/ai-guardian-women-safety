@@ -3,6 +3,8 @@ Central application configuration.
 Reads from environment variables (see .env.example at project root).
 """
 from functools import lru_cache
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +36,18 @@ class Settings(BaseSettings):
     SCREAM_PROBABILITY_THRESHOLD: float = 0.6
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @field_validator("MONGO_URI")
+    @classmethod
+    def normalize_mongo_uri(cls, value: str) -> str:
+        cleaned = value.strip()
+        if cleaned.startswith("mongodb:mongodb+srv://"):
+            return cleaned.replace("mongodb:mongodb+srv://", "mongodb+srv://", 1)
+        if cleaned.startswith("mongodb:mongodb://"):
+            return cleaned.replace("mongodb:mongodb://", "mongodb://", 1)
+        if cleaned.startswith("mongodb:"):
+            return cleaned.replace("mongodb:", "", 1)
+        return cleaned
 
     @property
     def cors_origins_list(self) -> list[str]:

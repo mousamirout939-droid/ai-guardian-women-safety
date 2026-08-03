@@ -73,6 +73,14 @@ def test_access_token_roundtrip():
     assert payload["type"] == "access"
 
 
+def test_settings_normalize_malformed_mongo_uri_prefix():
+    from app.config import Settings
+
+    settings = Settings(MONGO_URI="mongodb:mongodb+srv://user:pass@cluster.example/test?retryWrites=true")
+
+    assert settings.MONGO_URI == "mongodb+srv://user:pass@cluster.example/test?retryWrites=true"
+
+
 def test_risk_predictor_fallback_high_risk_at_night():
     predictor = RiskPredictor()
     predictor.model = None  # force heuristic fallback path
