@@ -1,0 +1,26 @@
+# Build context is the project root (see docker-compose.yml), because the
+# AI modules resolve saved_models/ as a sibling of server/ via a fixed
+# relative path (server/app/ai/*.py -> ../../../saved_models). Keeping that
+# same server/ + saved_models/ layout inside the image avoids re-deriving
+# a different path for container vs local runs.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY server/requirements.txt ./server/requirements.txt
+RUN pip install --no-cache-dir -r server/requirements.txt
+
+COPY server/ ./server/
+COPY saved_models/ ./saved_models/
+
+WORKDIR /app/server
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

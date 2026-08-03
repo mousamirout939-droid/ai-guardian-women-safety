@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: #0b1120;
+  }
+  ::selection {
+    background-color: rgba(245, 185, 66, 0.3);
+  }
+  :focus-visible {
+    outline: 2px solid #2dd4bf;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-white/[0.04] backdrop-blur-xl border border-white/[0.08] shadow-glass;
+  }
+  .glass-input {
+    @apply bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3 text-ink-100 placeholder:text-ink-500
+    focus:border-signal-500/50 focus:ring-1 focus:ring-signal-500/50 outline-none transition-colors;
+  }
+  .btn-beacon {
+    @apply bg-beacon-500 hover:bg-beacon-400 text-night-950 font-semibold rounded-xl px-6 py-3
+    transition-all shadow-beacon hover:shadow-lg active:scale-[0.98];
+  }
+  .btn-ghost {
+    @apply bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-ink-100 font-medium
+    rounded-xl px-6 py-3 transition-all active:scale-[0.98];
+  }
+}

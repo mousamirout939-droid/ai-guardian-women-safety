@@ -1,0 +1,37 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+email-validator==2.2.0
+pydantic-settings==2.7.1
+motor==3.6.0
+pymongo==4.9.2
+pyjwt==2.10.1
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-multipart==0.0.20
+slowapi==0.1.9
+redis==5.2.1
+
+# AI / ML
+torch==2.5.1
+torchvision==0.20.1  # not imported directly, but a hard requirement of ultralytics — pinned for reproducible builds
+# Deliberately no explicit opencv-python / opencv-python-headless pin here: mediapipe and
+# ultralytics each declare their own opencv dependency under a different package name
+# (opencv-contrib-python vs opencv-python respectively). Pinning a third one
+# (opencv-python-headless) on top causes pip to install THREE separate opencv builds side
+# by side — confirmed by testing. Let the two libraries resolve their own opencv builds.
+mediapipe==0.10.18  # DO NOT upgrade past 0.10.x without checking: versions 0.10.19+ dropped the
+                    # `mediapipe.solutions.hands` API that app/ai/gesture_detector.py depends on
+                    # in favor of the newer Tasks API. Confirmed by testing against 0.10.35.
+ultralytics==8.3.55
+librosa==0.10.2.post1
+soundfile==0.12.1  # functional dependency of librosa.load()'s audio backend, not imported directly
+scikit-learn==1.6.0
+joblib==1.4.2
+numpy==1.26.4
+pandas==2.2.3
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1
