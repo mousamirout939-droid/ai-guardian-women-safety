@@ -1,7 +1,9 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 
+const API_URL = import.meta.env.VITE_API_URL || "";
+
 const api = axios.create({
-  baseURL: "/api",
+  baseURL: `${API_URL}/api`,
 });
 
 export function getTokens() {
@@ -54,7 +56,7 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
       try {
-        const { data } = await axios.post("/api/auth/refresh", { refresh_token: refresh });
+        const { data } = await axios.post(`${API_URL}/api/auth/refresh`, { refresh_token: refresh });
         setTokens(data.access_token, data.refresh_token);
         pendingQueue.forEach((cb) => cb());
         pendingQueue = [];
