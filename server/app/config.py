@@ -28,7 +28,11 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # CORS
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    CORS_ORIGINS: str = (
+        "https://ai-guardian-women-safety.vercel.app,"
+        "https://ai-guardian-women-safety.onrender.com,"
+        "http://localhost:5173,http://localhost:3000,http://localhost:80"
+    )
 
     # AI thresholds
     GESTURE_CONFIDENCE_THRESHOLD: float = 0.7
