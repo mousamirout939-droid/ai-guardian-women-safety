@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# ai-guardian-women-safety
-=======
 # AI Guardian Shield
 
 **AI-powered women's safety network.** Real-time gesture, audio, and vision
