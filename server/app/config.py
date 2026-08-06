@@ -49,8 +49,6 @@ class Settings(BaseSettings):
             return cleaned.replace("mongodb:mongodb+srv://", "mongodb+srv://", 1)
         if cleaned.startswith("mongodb:mongodb://"):
             return cleaned.replace("mongodb:mongodb://", "mongodb://", 1)
-        if cleaned.startswith("mongodb:"):
-            return cleaned.replace("mongodb:", "", 1)
         return cleaned
 
     @property
