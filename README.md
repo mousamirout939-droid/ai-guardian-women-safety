@@ -241,6 +241,9 @@ running. Key endpoints:
 | GET/POST | `/api/alerts` | List / create alerts |
 | GET | `/api/alerts/feed` | Network-wide feed (police/admin only) |
 | PATCH | `/api/alerts/{id}/status` | Acknowledge / resolve / mark false alarm |
+| PUT | `/api/alerts/{id}/location` | Append the signed-in user's current point to their active manual SOS |
+| GET | `/api/safety/tracking/{token}` | Read one time-limited SOS status and location trail using its private link |
+| POST | `/api/safety/tracking/{token}/acknowledge` | Acknowledge that SOS and stop escalation |
 | POST | `/api/ai/gesture` | Upload a frame → gesture detection result |
 | POST | `/api/ai/object-detection` | Upload a frame → object/weapon detection result |
 | POST | `/api/ai/scream` | Upload an audio clip → scream probability |
@@ -284,6 +287,17 @@ secrets, never in source control. Trusted-contact phone numbers must use
 international E.164 format (for example, `+919876543210`). The SOS status
 reports whether Twilio accepted the messages, not whether the recipient read
 them; SMS delivery depends on a working provider account and network.
+
+Manual SOS SMS includes a private, expiring `/track/{token}` link. While the
+user's app remains open and location permission is enabled, their location is
+updated every five seconds. Contacts can view alert status and the location
+trail, then acknowledge the alert to stop escalation. Configure
+`PUBLIC_APP_URL` to the deployed frontend URL,
+`SOS_ESCALATION_DELAY_SECONDS` for the delay between contacts, and optionally
+`SOS_POLICE_HELPLINE` for the final SMS escalation target. The backend worker
+checks due escalations every 15 seconds; a helpline is contacted only when a
+number is configured and Twilio is operational. This is not an emergency
+service, and web location sharing stops when the browser/app is closed.
 
 The dashboard lists OpenStreetMap police-station results nearest-first and
 links to Google Maps walking directions. Distances are straight-line estimates;

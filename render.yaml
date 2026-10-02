@@ -11,3 +11,17 @@ services:
         value: 3.12.7
       - key: PORT
         value: 8000
+      - key: PUBLIC_APP_URL
+        value: https://ai-guardian-women-safety.vercel.app
+      - key: SOS_ESCALATION_DELAY_SECONDS
+        value: 60
+      - key: SOS_TRACKING_EXPIRY_HOURS
+        value: 24
+      - key: SOS_POLICE_HELPLINE
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false

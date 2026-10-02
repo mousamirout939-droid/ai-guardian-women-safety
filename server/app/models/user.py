@@ -35,6 +35,12 @@ class UserOut(BaseModel):
     created_at: datetime
 
 
+class SignupResponse(UserOut):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
 class UserUpdate(BaseModel):
     full_name: str | None = None
     phone: str | None = None

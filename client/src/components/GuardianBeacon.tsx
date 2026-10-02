@@ -40,11 +40,23 @@ export function GuardianBeacon({ state = "calm" }: { state?: BeaconState }) {
     setTriggering(true);
     setError("");
     try {
+      let location: { latitude: number; longitude: number } | undefined;
+      if (navigator.geolocation) {
+        try {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5000 });
+          });
+          location = { latitude: position.coords.latitude, longitude: position.coords.longitude };
+        } catch {
+          location = undefined;
+        }
+      }
       const response = await api.post<{ metadata: Record<string, unknown> }>("/alerts", {
         source: "manual_sos",
         severity: "critical",
         message: "Manual SOS triggered from dashboard beacon",
         confidence: 1.0,
+        location,
       });
       const sms = response.data.metadata.sms_notification as SmsNotification | undefined;
       if (!sms) {
@@ -61,6 +73,7 @@ export function GuardianBeacon({ state = "calm" }: { state?: BeaconState }) {
         setNotificationMessage("In-app alert sent, but SMS delivery failed.");
       }
       setTriggered(true);
+      window.dispatchEvent(new Event("guardian-sos-started"));
     } catch {
       setError("SOS could not be sent. Check your connection and try again.");
     } finally {

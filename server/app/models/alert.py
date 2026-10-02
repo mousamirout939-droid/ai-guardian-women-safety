@@ -39,5 +39,17 @@ class AlertOut(BaseModel):
     resolved_at: datetime | None = None
 
 
+class AlertCreated(AlertOut):
+    tracking_url: str | None = None
+
+
 class AlertStatusUpdate(BaseModel):
     status: AlertStatus
+
+
+class LocationUpdate(GeoPoint):
+    pass
+
+
+class TrackingAcknowledge(BaseModel):
+    name: str = Field(default="Trusted contact", min_length=1, max_length=80)

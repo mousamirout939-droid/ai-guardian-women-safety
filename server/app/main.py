@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -10,7 +11,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.config import get_settings
-from app.database import close_client, init_indexes
+from app.core.sos import sos_escalation_worker
+from app.database import close_client, get_db, init_indexes
 from app.routes import ai_inference, alerts, auth, contacts, safety, websocket
 
 logger = logging.getLogger("guardian_shield")
@@ -45,8 +47,16 @@ limiter = _build_limiter()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_indexes()
-    yield
-    await close_client()
+    escalation_task = asyncio.create_task(sos_escalation_worker(get_db))
+    try:
+        yield
+    finally:
+        escalation_task.cancel()
+        try:
+            await escalation_task
+        except asyncio.CancelledError:
+            pass
+        await close_client()
 
 
 app = FastAPI(

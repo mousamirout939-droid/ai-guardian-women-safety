@@ -232,6 +232,10 @@ export default function Dashboard() {
     : "calm";
 
   const activeAlerts = alerts.filter((a) => a.status === "active").length;
+  const routeDestination = destination ?? nearbyStations[0] ?? null;
+  const googleDirectionsUrl = currentLocation && routeDestination
+    ? `https://www.google.com/maps/dir/?api=1&origin=${currentLocation.latitude},${currentLocation.longitude}&destination=${routeDestination.latitude},${routeDestination.longitude}&travelmode=walking`
+    : null;
 
   return (
     <AppShell>
@@ -359,6 +363,7 @@ export default function Dashboard() {
                     destination={destination}
                     stations={nearbyStations}
                     walkingRoute={walkingRoute}
+                    googleDirectionsUrl={googleDirectionsUrl}
                   />
                 </Suspense>
               )}

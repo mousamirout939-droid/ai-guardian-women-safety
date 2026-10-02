@@ -73,6 +73,37 @@ def test_access_token_roundtrip():
     assert payload["type"] == "access"
 
 
+def test_signup_returns_user_and_tokens_in_one_response(monkeypatch):
+    import asyncio
+    from bson import ObjectId
+    from app.models.user import UserSignup
+    from app.routes import auth
+    from app.core.security import decode_token
+
+    class FakeUsers:
+        async def find_one(self, query):
+            return None
+
+        async def insert_one(self, document):
+            self.document = document
+            return type("InsertResult", (), {"inserted_id": ObjectId()})()
+
+    class FakeDb:
+        users = FakeUsers()
+
+    monkeypatch.setattr(auth, "get_db", lambda: FakeDb())
+    response = asyncio.run(auth.signup(UserSignup(
+        full_name="Test Person",
+        email="signup-speed@example.com",
+        password="StrongPassword123",
+        phone="+919876543210",
+    )))
+
+    assert response.email == "signup-speed@example.com"
+    assert decode_token(response.access_token)["sub"] == response.id
+    assert decode_token(response.refresh_token)["sub"] == response.id
+
+
 def test_settings_normalize_malformed_mongo_uri_prefix():
     from app.config import Settings
 
@@ -174,7 +205,7 @@ def test_sos_sms_reports_missing_configuration():
 def test_sos_sms_sends_to_trusted_contacts(monkeypatch):
     import asyncio
     from app.config import Settings
-    from app.routes import alerts
+    from app.core import sos
 
     settings = Settings(
         TWILIO_ACCOUNT_SID="AC123",
@@ -198,16 +229,133 @@ def test_sos_sms_sends_to_trusted_contacts(monkeypatch):
             requests.append((url, data, auth))
             return FakeResponse()
 
-    monkeypatch.setattr(alerts, "get_settings", lambda: settings)
-    monkeypatch.setattr(alerts.httpx, "AsyncClient", lambda timeout: FakeClient())
+    monkeypatch.setattr(sos, "get_settings", lambda: settings)
+    monkeypatch.setattr(sos.httpx, "AsyncClient", lambda timeout: FakeClient())
     result = asyncio.run(
-        alerts._send_sos_sms([{"phone": "+919876543210"}], "Test User", None)
+        sos.send_sos_sms([{"phone": "+919876543210"}], "Test User", None)
     )
 
     assert result == {"status": "accepted", "sent": 1, "total": 1}
     assert requests[0][1]["To"] == "+919876543210"
     assert requests[0][1]["From"] == "+15555550100"
     assert requests[0][2] == ("AC123", "test-token")
+
+
+def test_sos_escalation_notifies_next_contact(monkeypatch):
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from app.config import Settings
+    from app.core import sos
+
+    now = datetime.now(timezone.utc)
+    alert = {
+        "_id": "alert-123",
+        "user_id": "user-123",
+        "source": "manual_sos",
+        "status": "active",
+        "user_name": "Test User",
+        "created_at": now - timedelta(minutes=2),
+        "escalation": {"next_at": now - timedelta(seconds=1), "next_contact_index": 1},
+    }
+    contacts = [
+        {"name": "First Contact", "phone": "+919876543210", "priority": 1},
+        {"name": "Second Contact", "phone": "+919876543211", "priority": 2},
+    ]
+    sms_calls = []
+
+    class FakeCursor:
+        def __init__(self, values):
+            self.values = values
+
+        def sort(self, *_):
+            return self
+
+        def __aiter__(self):
+            async def iterate():
+                for value in self.values:
+                    yield value
+            return iterate()
+
+    class FakeAlerts:
+        def find(self, _query):
+            return FakeCursor([alert])
+
+        async def find_one_and_update(self, *_args, **_kwargs):
+            return alert
+
+        async def update_one(self, _query, update):
+            self.update = update
+
+    class FakeContacts:
+        def find(self, _query):
+            return FakeCursor(contacts)
+
+    class FakeDb:
+        alerts = FakeAlerts()
+        contacts = FakeContacts()
+
+    async def fake_send(contacts_to_notify, *_args):
+        sms_calls.extend(contacts_to_notify)
+        return {"status": "accepted", "sent": 1, "total": 1}
+
+    monkeypatch.setattr(sos, "get_settings", lambda: Settings(SOS_ESCALATION_DELAY_SECONDS=60))
+    monkeypatch.setattr(sos, "send_sos_sms", fake_send)
+    processed = asyncio.run(sos.process_due_sos_escalations(FakeDb(), now))
+
+    assert processed == 1
+    assert [contact["name"] for contact in sms_calls] == ["Second Contact"]
+
+
+def test_tracking_acknowledgement_stops_escalation(monkeypatch):
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from bson import ObjectId
+    from app.core.sos import hash_tracking_token
+    from app.models.alert import TrackingAcknowledge
+    from app.routes import safety
+
+    token = "a" * 64
+    alert = {
+        "_id": ObjectId(),
+        "user_id": "user-123",
+        "tracking_token_hash": hash_tracking_token(token),
+        "tracking_expires_at": datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
+        "source": "manual_sos",
+        "severity": "critical",
+        "status": "active",
+        "message": "SOS",
+        "confidence": 1.0,
+        "metadata": {},
+        "created_at": datetime.now(timezone.utc),
+        "resolved_at": None,
+        "escalation": {"next_at": datetime.now(timezone.utc)},
+    }
+
+    class FakeAlerts:
+        async def find_one(self, _query):
+            return alert
+
+        async def find_one_and_update(self, _query, update, **_kwargs):
+            alert.update(update["$set"])
+            return alert
+
+    class FakeDb:
+        alerts = FakeAlerts()
+
+    events = []
+
+    async def send_to_user(user_id, event):
+        events.append((user_id, event))
+
+    monkeypatch.setattr(safety, "get_db", lambda: FakeDb())
+    monkeypatch.setattr(safety.manager, "send_to_user", send_to_user)
+    response = asyncio.run(safety.acknowledge_sos_tracking(token, TrackingAcknowledge(name="Alex")))
+
+    assert response["status"] == "acknowledged"
+    assert alert["acknowledged_by"] == "Alex"
+    assert alert["escalation.next_at"] is None
+    assert events[0][0] == "user-123"
+    assert events[0][1]["alert"]["status"] == "acknowledged"
 
 
 def test_contact_phone_requires_international_format():

@@ -8,6 +8,7 @@ import Dashboard from "@/pages/Dashboard";
 import AICamera from "@/pages/AICamera";
 import Alerts from "@/pages/Alerts";
 import Contacts from "@/pages/Contacts";
+import Tracking from "@/pages/Tracking";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/" element={<Landing />} />
+          <Route path="/track/:token" element={<Tracking />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route

@@ -3,6 +3,9 @@ import { LayoutDashboard, Camera, Bell, Users, LogOut, ShieldCheck } from "lucid
 import { useAuth } from "@/context/AuthContext";
 import { ReactNode } from "react";
 import clsx from "clsx";
+import { useEffect } from "react";
+import api from "@/lib/api";
+import { Alert } from "@/lib/types";
 
 const NAV_ITEMS = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -14,6 +17,65 @@ const NAV_ITEMS = [
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let watchId: number | null = null;
+    let watchedAlertId: string | null = null;
+    let lastSentAt = 0;
+    let sendingLocation = false;
+
+    const stopWatching = () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+      watchedAlertId = null;
+      lastSentAt = 0;
+    };
+
+    const syncActiveSos = async () => {
+      try {
+        const { data: alerts } = await api.get<Alert[]>("/alerts", { params: { limit: 100 } });
+        const activeSos = alerts.find((alert) => alert.source === "manual_sos" && alert.status === "active");
+        if (!activeSos) {
+          stopWatching();
+          return;
+        }
+        if (activeSos.id === watchedAlertId || !navigator.geolocation) return;
+
+        stopWatching();
+        watchedAlertId = activeSos.id;
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const now = Date.now();
+            if (sendingLocation || now - lastSentAt < 5000 || !watchedAlertId) return;
+            sendingLocation = true;
+            lastSentAt = now;
+            const alertId = watchedAlertId;
+            api.put(`/alerts/${alertId}/location`, {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            }).catch(() => {
+              lastSentAt = Math.min(lastSentAt, Date.now() - 5000);
+            }).finally(() => {
+              sendingLocation = false;
+            });
+          },
+          () => undefined,
+          { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+        );
+      } catch {
+        stopWatching();
+      }
+    };
+
+    void syncActiveSos();
+    const interval = window.setInterval(syncActiveSos, 10_000);
+    window.addEventListener("guardian-sos-started", syncActiveSos);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("guardian-sos-started", syncActiveSos);
+      stopWatching();
+    };
+  }, []);
 
   function handleLogout() {
     logout();

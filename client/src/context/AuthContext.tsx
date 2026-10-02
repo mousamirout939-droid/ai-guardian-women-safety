@@ -37,8 +37,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signup(fullName: string, email: string, password: string, phone: string) {
-    await api.post("/auth/signup", { full_name: fullName, email, password, phone });
-    await login(email, password);
+    const { data } = await api.post<User & { access_token: string; refresh_token: string }>("/auth/signup", {
+      full_name: fullName,
+      email,
+      password,
+      phone,
+    });
+    setTokens(data.access_token, data.refresh_token);
+    setUser(data);
   }
 
   function logout() {

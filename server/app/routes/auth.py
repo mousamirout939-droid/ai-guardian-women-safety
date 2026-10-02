@@ -13,7 +13,7 @@ from app.core.security import (
     verify_password,
 )
 from app.database import get_db
-from app.models.user import RefreshRequest, TokenPair, UserLogin, UserOut, UserSignup, UserUpdate
+from app.models.user import RefreshRequest, SignupResponse, TokenPair, UserLogin, UserOut, UserSignup, UserUpdate
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -29,7 +29,7 @@ def _serialize_user(user: dict) -> UserOut:
     )
 
 
-@router.post("/signup", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+@router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
 async def signup(payload: UserSignup):
     db = get_db()
     existing = await db.users.find_one({"email": payload.email})
@@ -46,7 +46,13 @@ async def signup(payload: UserSignup):
     }
     result = await db.users.insert_one(doc)
     doc["_id"] = result.inserted_id
-    return _serialize_user(doc)
+    user_id = str(result.inserted_id)
+    user = _serialize_user(doc)
+    return SignupResponse(
+        **user.model_dump(),
+        access_token=create_access_token(user_id, "user"),
+        refresh_token=create_refresh_token(user_id),
+    )
 
 
 @router.post("/login", response_model=TokenPair)

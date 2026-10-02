@@ -1,11 +1,18 @@
+from datetime import datetime, timezone
 from math import asin, cos, radians, sin, sqrt
 from typing import Any
 
+from bson import ObjectId
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime, timezone
 
 from app.config import get_settings
 from app.core.deps import get_current_user
+from app.core.sos import hash_tracking_token
+from app.core.ws_manager import manager
+from app.database import get_db
+from app.models.alert import AlertOut, TrackingAcknowledge
 
 router = APIRouter(prefix="/api/safety", tags=["safety"])
 settings = get_settings()
@@ -45,6 +52,16 @@ def _serialize_route(route: dict[str, Any]) -> dict[str, Any]:
         "duration_minutes": round(route.get("duration", 0) / 60),
     }
 
+async def _get_tracking_alert(token: str) -> dict:
+    alert = await get_db().alerts.find_one({"tracking_token_hash": hash_tracking_token(token)})
+    if not alert:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracking link not found")
+    expires_at = alert.get("tracking_expires_at")
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at and expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Tracking link has expired")
+    return alert
 
 @router.get("/geocode")
 async def geocode_place(
@@ -95,6 +112,60 @@ async def walking_route(
         raise HTTPException(status_code=404, detail="No pedestrian route found between those locations.")
 
     return _serialize_route(routes[0])
+
+
+@router.get("/tracking/{token}")
+async def get_sos_tracking(token: str):
+    """Read one SOS through its unguessable, time-limited share token."""
+    alert = await _get_tracking_alert(token)
+    return {
+        "alert_id": str(alert["_id"]),
+        "user_name": alert.get("user_name", "Guardian Shield user"),
+        "status": alert.get("status", "active"),
+        "severity": alert.get("severity", "critical"),
+        "message": alert.get("message", "Emergency SOS"),
+        "created_at": alert["created_at"],
+        "location": alert.get("location"),
+        "location_history": alert.get("location_history", []),
+        "acknowledged_at": alert.get("acknowledged_at"),
+        "acknowledged_by": alert.get("acknowledged_by"),
+        "escalation_state": alert.get("escalation", {}).get("state", "waiting_for_acknowledgement"),
+    }
+
+
+@router.post("/tracking/{token}/acknowledge")
+async def acknowledge_sos_tracking(token: str, payload: TrackingAcknowledge):
+    alert = await _get_tracking_alert(token)
+    now = datetime.now(timezone.utc)
+    result = await get_db().alerts.find_one_and_update(
+        {"_id": ObjectId(alert["_id"]), "status": "active"},
+        {"$set": {
+            "status": "acknowledged",
+            "acknowledged_at": now,
+            "acknowledged_by": payload.name.strip(),
+            "escalation.next_at": None,
+            "escalation.state": "acknowledged",
+        }},
+        return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This SOS is no longer active")
+
+    alert_out = AlertOut(
+        id=str(result["_id"]),
+        user_id=str(result["user_id"]),
+        source=result["source"],
+        severity=result["severity"],
+        status=result["status"],
+        message=result.get("message", ""),
+        location=result.get("location"),
+        confidence=result.get("confidence", 1.0),
+        metadata=result.get("metadata", {}),
+        created_at=result["created_at"],
+        resolved_at=result.get("resolved_at"),
+    )
+    await manager.send_to_user(str(result["user_id"]), {"type": "alert_updated", "alert": alert_out.model_dump()})
+    return {"status": "acknowledged", "acknowledged_at": now, "acknowledged_by": payload.name.strip()}
 
 
 @router.get("/police-stations")

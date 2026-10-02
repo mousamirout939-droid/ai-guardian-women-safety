@@ -37,6 +37,8 @@ async def init_indexes() -> None:
         await db.contacts.create_index("user_id")
         await db.alerts.create_index("user_id")
         await db.alerts.create_index("created_at")
+        await db.alerts.create_index("tracking_token_hash", sparse=True)
+        await db.alerts.create_index([("status", 1), ("escalation.next_at", 1)])
         await db.locations.create_index([("user_id", 1), ("timestamp", -1)])
     except Exception as exc:  # pragma: no cover - defensive deployment guard
         logger.warning("MongoDB startup indexes skipped: %s", exc)

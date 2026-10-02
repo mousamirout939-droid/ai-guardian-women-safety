@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_FROM_NUMBER: str = ""
+    PUBLIC_APP_URL: str = "http://localhost:5173"
+    SOS_ESCALATION_DELAY_SECONDS: int = 60
+    SOS_POLICE_HELPLINE: str = ""
+    SOS_TRACKING_EXPIRY_HOURS: int = 24
 
     # CORS
     CORS_ORIGINS: str = (
