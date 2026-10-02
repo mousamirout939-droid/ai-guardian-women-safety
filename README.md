@@ -275,6 +275,20 @@ development of this repo, not hypothetical.
 - CORS restricted via `CORS_ORIGINS` env var — set this explicitly in production
 - **Before production use:** replace `JWT_SECRET_KEY`, put the API behind HTTPS, and add centralized logging/monitoring for the alerts pipeline
 
+### SOS text messages and nearby police stations
+
+Manual SOS alerts are sent to the user's trusted contacts in-app. Optional SMS
+delivery uses Twilio; configure `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and
+`TWILIO_FROM_NUMBER` in the server environment. Store these as deployment
+secrets, never in source control. Trusted-contact phone numbers must use
+international E.164 format (for example, `+919876543210`). The SOS status
+reports whether Twilio accepted the messages, not whether the recipient read
+them; SMS delivery depends on a working provider account and network.
+
+The dashboard lists OpenStreetMap police-station results nearest-first and
+links to Google Maps walking directions. Distances are straight-line estimates;
+the route is not verified as safe.
+
 ---
 
 ## Extending the platform

@@ -1,12 +1,14 @@
-import { useEffect, useState, useCallback } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useState, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { GuardianBeacon } from "@/components/GuardianBeacon";
 import { useAlertsSocket } from "@/hooks/useAlertsSocket";
 import api from "@/lib/api";
 import { Alert, RiskPrediction } from "@/lib/types";
 import { useAuth } from "@/context/AuthContext";
-import { AlertTriangle, Users, Activity, TrendingUp, Phone, MapPin } from "lucide-react";
+import { AlertTriangle, Users, Activity, TrendingUp, Phone, MapPin, Navigation } from "lucide-react";
 import clsx from "clsx";
+
+const PoliceHelpMap = lazy(() => import("@/components/PoliceHelpMap"));
 
 const SEVERITY_STYLES: Record<Alert["severity"], string> = {
   low: "text-signal-400 bg-signal-500/10 border-signal-500/20",
@@ -15,12 +17,44 @@ const SEVERITY_STYLES: Record<Alert["severity"], string> = {
   critical: "text-alarm-400 bg-alarm-500/10 border-alarm-500/20",
 };
 
+interface Coordinates {
+  latitude: number;
+  longitude: number;
+}
+
+interface PoliceStation extends Coordinates {
+  name: string;
+  address: string;
+  phone: string;
+  distance_km: number;
+}
+
+interface Place extends Coordinates {
+  name: string;
+}
+
+interface WalkingRoute {
+  coordinates: Array<[number, number]>;
+  distance_km: number;
+  duration_minutes: number;
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [risk, setRisk] = useState<RiskPrediction | null>(null);
   const [contactCount, setContactCount] = useState<number>(0);
-  const [nearbyStations, setNearbyStations] = useState<Array<{ name: string; address: string; phone: string; latitude: number; longitude: number }>>([]);
+  const [nearbyStations, setNearbyStations] = useState<PoliceStation[]>([]);
+  const [currentLocation, setCurrentLocation] = useState<Coordinates | null>(null);
+  const [walkingRoute, setWalkingRoute] = useState<Array<[number, number]> | null>(null);
+  const [destination, setDestination] = useState<Place | null>(null);
+  const [startLabel, setStartLabel] = useState("Your location");
+  const [startQuery, setStartQuery] = useState("");
+  const [destinationQuery, setDestinationQuery] = useState("");
+  const [routeStatus, setRouteStatus] = useState("");
+  const [routeError, setRouteError] = useState("");
+  const [searchingRoute, setSearchingRoute] = useState(false);
+  const [manualRoute, setManualRoute] = useState(false);
   const [loading, setLoading] = useState(true);
   const isAdminFeed = user?.role === "admin" || user?.role === "police";
 
@@ -53,10 +87,15 @@ export default function Dashboard() {
           timeout: 8000,
         });
       });
-      const nearbyRes = await api.get<{ stations: Array<{ name: string; address: string; phone: string; latitude: number; longitude: number }> }>('/safety/police-stations', {
+      const location = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      };
+      setCurrentLocation(location);
+      setStartLabel("Your current location");
+      const nearbyRes = await api.get<{ stations: PoliceStation[] }>('/safety/police-stations', {
         params: {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
+          ...location,
           radius_km: 5,
         },
       });
@@ -71,6 +110,113 @@ export default function Dashboard() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const nearestStation = nearbyStations[0];
+    if (manualRoute) return;
+    if (!currentLocation || !nearestStation) {
+      setWalkingRoute(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    api.get<WalkingRoute>("/safety/walking-route", {
+      params: {
+        start_latitude: currentLocation.latitude,
+        start_longitude: currentLocation.longitude,
+        end_latitude: nearestStation.latitude,
+        end_longitude: nearestStation.longitude,
+      },
+      signal: controller.signal,
+    })
+      .then(({ data }) => {
+        if (controller.signal.aborted) return;
+        setWalkingRoute(data.coordinates);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setWalkingRoute(null);
+      });
+
+    return () => controller.abort();
+  }, [currentLocation, nearbyStations, manualRoute]);
+
+  async function findRoute(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSearchingRoute(true);
+    setRouteError("");
+    setRouteStatus("");
+    setWalkingRoute(null);
+    setManualRoute(true);
+
+    try {
+      const destinationResponse = await api.get<{ results: Place[] }>("/safety/geocode", {
+        params: { query: destinationQuery },
+      });
+      const resolvedDestination = destinationResponse.data.results[0];
+      if (!resolvedDestination) throw new Error("Destination not found. Try adding a city or postcode.");
+
+      let resolvedStart: Place | Coordinates | null = currentLocation;
+      if (startQuery.trim()) {
+        const startResponse = await api.get<{ results: Place[] }>("/safety/geocode", {
+          params: { query: startQuery },
+        });
+        resolvedStart = startResponse.data.results[0] ?? null;
+        if (!resolvedStart) throw new Error("Starting place not found. Try adding a city or postcode.");
+        setStartLabel("Starting point");
+      } else if (resolvedStart) {
+        setStartLabel("Your current location");
+      }
+      if (!resolvedStart) throw new Error("Enter a starting place or allow location access to use your current location.");
+
+      setCurrentLocation({ latitude: resolvedStart.latitude, longitude: resolvedStart.longitude });
+      setDestination(resolvedDestination);
+
+      const [routeResponse, stationsResponse] = await Promise.all([
+        api.get<WalkingRoute>("/safety/walking-route", {
+          params: {
+            start_latitude: resolvedStart.latitude,
+            start_longitude: resolvedStart.longitude,
+            end_latitude: resolvedDestination.latitude,
+            end_longitude: resolvedDestination.longitude,
+          },
+        }),
+        api.get<{ stations: PoliceStation[] }>("/safety/police-stations", {
+          params: {
+            latitude: resolvedDestination.latitude,
+            longitude: resolvedDestination.longitude,
+            radius_km: 5,
+          },
+        }).catch(() => null),
+      ]);
+
+      setWalkingRoute(routeResponse.data.coordinates);
+      setNearbyStations(stationsResponse?.data.stations ?? []);
+      setRouteStatus(
+        `Estimated walk: ${routeResponse.data.distance_km} km, about ${routeResponse.data.duration_minutes} minutes.`
+      );
+    } catch (error) {
+      setRouteError(error instanceof Error ? error.message : "Could not find that route. Please try again.");
+      setNearbyStations([]);
+    } finally {
+      setSearchingRoute(false);
+    }
+  }
+
+  function useCurrentLocation() {
+    setStartQuery("");
+    if (currentLocation) {
+      setStartLabel("Your current location");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        setCurrentLocation({ latitude: coords.latitude, longitude: coords.longitude });
+        setStartLabel("Your current location");
+      },
+      () => setRouteError("Could not access your location. Enter a starting place instead."),
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
 
   useAlertsSocket((event) => {
     if (event.type === "new_alert" || event.type === "alert_updated") {
@@ -158,31 +304,105 @@ export default function Dashboard() {
             <h2 className="font-display text-lg font-medium">Nearby police help</h2>
             <MapPin className="h-4 w-4 text-beacon-400" />
           </div>
-          {nearbyStations.length === 0 ? (
-            <p className="text-sm text-ink-500">Location permission is needed to fetch nearby police stations.</p>
-          ) : (
-            <div className="space-y-3">
+          <div className="space-y-4">
+            <form onSubmit={findRoute} className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+              <label className="text-xs font-medium text-ink-400">
+                From
+                <input
+                  value={startQuery}
+                  onChange={(event) => setStartQuery(event.target.value)}
+                  placeholder={currentLocation ? "Use current location or enter a place" : "Enter starting area, address, or city"}
+                  className="glass-input mt-1.5 w-full"
+                />
+              </label>
+              <label className="text-xs font-medium text-ink-400">
+                To
+                <input
+                  required
+                  minLength={3}
+                  value={destinationQuery}
+                  onChange={(event) => setDestinationQuery(event.target.value)}
+                  placeholder="Enter destination, address, or city"
+                  className="glass-input mt-1.5 w-full"
+                />
+              </label>
+              <button disabled={searchingRoute} type="submit" className="btn-beacon self-end">
+                {searchingRoute ? "Finding route…" : "Show route"}
+              </button>
+            </form>
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <button type="button" onClick={useCurrentLocation} className="btn-ghost px-3 py-2 text-xs">
+                Use my location as start
+              </button>
+              {currentLocation && <span className="text-xs text-ink-500">Start: {startLabel}</span>}
+            </div>
+            {routeError && <p role="alert" className="text-sm text-alarm-400">{routeError}</p>}
+            {routeStatus && <p className="text-sm text-signal-300">{routeStatus}</p>}
+            {nearbyStations.length === 0 && !routeStatus && (
+              <p className="text-sm text-ink-500">
+                Search for a destination to see nearby police stations. GPS is optional.
+              </p>
+            )}
+            {routeStatus && nearbyStations.length === 0 && (
+              <p className="text-sm text-ink-500">No police stations were found within 5 km of the destination.</p>
+            )}
+            {(currentLocation || destination) && (
+              <div className="space-y-3">
+              <p className="text-xs text-ink-500">
+                Place names are searched with OpenStreetMap Nominatim; route coordinates go to its walking router. Routes are estimates, not safety-verified.
+              </p>
+              {currentLocation && (nearbyStations.length > 0 || walkingRoute) && (
+                <Suspense fallback={<div className="flex h-80 items-center justify-center rounded-xl bg-white/[0.03] text-sm text-ink-400">Loading map…</div>}>
+                  <PoliceHelpMap
+                    currentLocation={currentLocation}
+                    startLabel={startLabel}
+                    destination={destination}
+                    stations={nearbyStations}
+                    walkingRoute={walkingRoute}
+                  />
+                </Suspense>
+              )}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-400">
+                <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-signal-400" />{startLabel}</span>
+                {destination && <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-beacon-400" />{destination.name}</span>}
+                {nearbyStations.length > 0 && <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-alarm-500" />Police station</span>}
+                {walkingRoute && <span className="flex items-center gap-2"><span className="h-1 w-4 rounded bg-teal-700" />{destination ? "Walking route" : "Walking route to nearest station"}</span>}
+                {!walkingRoute && <span>Route preview unavailable; use Directions below.</span>}
+              </div>
               {nearbyStations.map((station) => (
                 <div key={`${station.name}-${station.address}`} className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-sm font-medium text-ink-100">{station.name}</p>
-                      <p className="mt-1 text-xs text-ink-400">{station.address}</p>
+                      <p className="mt-1 text-xs text-ink-400">{station.address || "Address not listed"}</p>
+                      <p className="mt-1 font-mono text-xs text-ink-500">{station.distance_km.toFixed(1)} km away</p>
                     </div>
-                    {station.phone ? (
+                    <div className="flex shrink-0 flex-col items-end gap-2">
                       <a
-                        href={`tel:${station.phone}`}
-                        className="inline-flex items-center gap-2 rounded-lg border border-beacon-500/30 bg-beacon-500/10 px-3 py-1.5 text-xs font-medium text-beacon-300"
+                        href={`https://www.google.com/maps/dir/?api=1${currentLocation ? `&origin=${currentLocation.latitude},${currentLocation.longitude}` : ""}&destination=${station.latitude},${station.longitude}&travelmode=walking`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-lg border border-signal-500/30 bg-signal-500/10 px-3 py-1.5 text-xs font-medium text-signal-300"
                       >
-                        <Phone className="h-3.5 w-3.5" />
-                        Call
+                        <Navigation className="h-3.5 w-3.5" />
+                        Directions
                       </a>
-                    ) : null}
+                      {station.phone ? (
+                        <a
+                          href={`tel:${station.phone}`}
+                          className="inline-flex items-center gap-2 rounded-lg border border-beacon-500/30 bg-beacon-500/10 px-3 py-1.5 text-xs font-medium text-beacon-300"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                          Call
+                        </a>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               ))}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="glass-panel mt-6 rounded-2xl p-6">

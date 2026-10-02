@@ -1,9 +1,10 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 
-const API_URL =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") ||
-  import.meta.env.VITE_RENDER_API_URL?.replace(/\/$/, "") ||
-  "https://ai-guardian-women-safety.onrender.com";
+const API_URL = import.meta.env.DEV
+  ? import.meta.env.VITE_API_URL?.replace(/\/$/, "") || ""
+  : import.meta.env.VITE_API_URL?.replace(/\/$/, "") ||
+    import.meta.env.VITE_RENDER_API_URL?.replace(/\/$/, "") ||
+    "https://ai-guardian-women-safety.onrender.com";
 
 const api = axios.create({
   baseURL: `${API_URL}/api`,

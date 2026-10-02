@@ -5,6 +5,7 @@ import api from "@/lib/api";
 import clsx from "clsx";
 
 type BeaconState = "calm" | "caution" | "critical";
+type SmsNotification = { status: string; sent: number; total: number };
 
 const STATE_STYLES: Record<BeaconState, { ring: string; core: string; glow: string; label: string }> = {
   calm: {
@@ -30,21 +31,38 @@ const STATE_STYLES: Record<BeaconState, { ring: string; core: string; glow: stri
 export function GuardianBeacon({ state = "calm" }: { state?: BeaconState }) {
   const [triggering, setTriggering] = useState(false);
   const [triggered, setTriggered] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState("");
+  const [error, setError] = useState("");
   const styles = STATE_STYLES[triggered ? "critical" : state];
 
   async function handleTrigger() {
     if (triggering) return;
     setTriggering(true);
+    setError("");
     try {
-      await api.post("/alerts", {
+      const response = await api.post<{ metadata: Record<string, unknown> }>("/alerts", {
         source: "manual_sos",
         severity: "critical",
         message: "Manual SOS triggered from dashboard beacon",
         confidence: 1.0,
       });
+      const sms = response.data.metadata.sms_notification as SmsNotification | undefined;
+      if (!sms) {
+        setNotificationMessage("In-app SOS alert sent.");
+      } else if (sms.status === "accepted") {
+        setNotificationMessage(`SMS accepted by Twilio for ${sms.sent}/${sms.total} trusted contacts.`);
+      } else if (sms.status === "partial") {
+        setNotificationMessage(`SMS accepted for ${sms.sent}/${sms.total} trusted contacts.`);
+      } else if (sms.status === "not_configured") {
+        setNotificationMessage("In-app alert sent; SMS is not configured on the server.");
+      } else if (sms.status === "no_contacts") {
+        setNotificationMessage("Alert sent in app; add a trusted contact to send SMS.");
+      } else {
+        setNotificationMessage("In-app alert sent, but SMS delivery failed.");
+      }
       setTriggered(true);
     } catch {
-      // Surfaced via toast in a real deployment; kept silent here to avoid blocking the tap.
+      setError("SOS could not be sent. Check your connection and try again.");
     } finally {
       setTriggering(false);
     }
@@ -72,8 +90,9 @@ export function GuardianBeacon({ state = "calm" }: { state?: BeaconState }) {
         </motion.button>
       </div>
       <p className="font-mono text-xs uppercase tracking-widest text-ink-400">
-        {triggered ? "Alert sent to your network" : styles.label}
+        {triggered ? notificationMessage : styles.label}
       </p>
+      {error && <p role="alert" className="text-center text-xs text-alarm-400">{error}</p>}
     </div>
   );
 }

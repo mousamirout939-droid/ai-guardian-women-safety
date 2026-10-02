@@ -125,7 +125,7 @@ def test_risk_model_artifact_is_found_and_loaded():
 
 
 def test_nearby_police_station_address_formatting():
-    from app.routes.safety import _format_station_address
+    from app.routes.safety import _distance_km, _format_station_address, _serialize_place, _serialize_route
 
     tags = {
         "name": "Central Police Station",
@@ -137,6 +137,88 @@ def test_nearby_police_station_address_formatting():
 
     formatted = _format_station_address(tags)
     assert formatted == "12 Main Street, San Francisco, 94103"
+    assert _distance_km(0, 0, 0, 0) == 0
+    assert round(_distance_km(0, 0, 0, 1), 2) == 111.19
+    assert _serialize_place({"display_name": "Bengaluru", "lat": "12.97", "lon": "77.59"}) == {
+        "name": "Bengaluru",
+        "latitude": 12.97,
+        "longitude": 77.59,
+    }
+    assert _serialize_route({
+        "distance": 1500,
+        "duration": 900,
+        "geometry": {"coordinates": [[77.59, 12.97], [77.60, 12.98]]},
+    }) == {
+        "coordinates": [[12.97, 77.59], [12.98, 77.6]],
+        "distance_km": 1.5,
+        "duration_minutes": 15,
+    }
+
+
+def test_sos_sms_reports_missing_configuration():
+    import asyncio
+    from app.config import Settings
+    from app.routes import alerts
+
+    settings = Settings(TWILIO_ACCOUNT_SID="", TWILIO_AUTH_TOKEN="", TWILIO_FROM_NUMBER="")
+    original_get_settings = alerts.get_settings
+    alerts.get_settings = lambda: settings
+    try:
+        result = asyncio.run(alerts._send_sos_sms([{"phone": "+15555550123"}], "Test User", None))
+    finally:
+        alerts.get_settings = original_get_settings
+
+    assert result == {"status": "not_configured", "sent": 0, "total": 1}
+
+
+def test_sos_sms_sends_to_trusted_contacts(monkeypatch):
+    import asyncio
+    from app.config import Settings
+    from app.routes import alerts
+
+    settings = Settings(
+        TWILIO_ACCOUNT_SID="AC123",
+        TWILIO_AUTH_TOKEN="test-token",
+        TWILIO_FROM_NUMBER="+15555550100",
+    )
+    requests = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def post(self, url, data, auth):
+            requests.append((url, data, auth))
+            return FakeResponse()
+
+    monkeypatch.setattr(alerts, "get_settings", lambda: settings)
+    monkeypatch.setattr(alerts.httpx, "AsyncClient", lambda timeout: FakeClient())
+    result = asyncio.run(
+        alerts._send_sos_sms([{"phone": "+919876543210"}], "Test User", None)
+    )
+
+    assert result == {"status": "accepted", "sent": 1, "total": 1}
+    assert requests[0][1]["To"] == "+919876543210"
+    assert requests[0][1]["From"] == "+15555550100"
+    assert requests[0][2] == ("AC123", "test-token")
+
+
+def test_contact_phone_requires_international_format():
+    import pytest
+    from pydantic import ValidationError
+    from app.models.contact import ContactCreate
+
+    contact = ContactCreate(name="Trusted Person", phone="+919876543210")
+    assert contact.phone == "+919876543210"
+    with pytest.raises(ValidationError):
+        ContactCreate(name="Trusted Person", phone="9876543210")
 
 
 def test_risk_labels_are_valid():

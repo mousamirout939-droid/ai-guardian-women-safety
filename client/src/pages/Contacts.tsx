@@ -61,8 +61,18 @@ export default function Contacts() {
                 <input required value={name} onChange={(e) => setName(e.target.value)} className="glass-input w-full" />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-400">Phone</label>
-                <input required value={phone} onChange={(e) => setPhone(e.target.value)} className="glass-input w-full" />
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-400">Phone for SMS</label>
+                <input
+                  required
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+919876543210"
+                  pattern="\\+[1-9][0-9]{7,14}"
+                  title="Enter the full international number, including + and country code."
+                  className="glass-input w-full"
+                />
+                <p className="mt-1 text-xs text-ink-500">Include + and country code.</p>
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-400">Relationship</label>

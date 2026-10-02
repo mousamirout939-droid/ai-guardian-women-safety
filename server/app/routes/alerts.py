@@ -1,14 +1,53 @@
+import asyncio
+import logging
 from datetime import datetime, timezone
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
+import httpx
 
+from app.config import get_settings
 from app.core.deps import get_current_user, require_role
 from app.core.ws_manager import manager
 from app.database import get_db
 from app.models.alert import AlertCreate, AlertOut, AlertStatusUpdate
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
+logger = logging.getLogger(__name__)
+
+
+async def _send_sos_sms(contacts: list[dict], user_name: str, location: dict | None) -> dict:
+    if not contacts:
+        return {"status": "no_contacts", "sent": 0, "total": 0}
+
+    settings = get_settings()
+    if not all((settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN, settings.TWILIO_FROM_NUMBER)):
+        return {"status": "not_configured", "sent": 0, "total": len(contacts)}
+
+    message = f"Emergency SOS from {user_name}. Please contact them immediately."
+    if location:
+        message += f" Last location: https://maps.google.com/?q={location['latitude']},{location['longitude']}"
+    endpoint = f"https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json"
+
+    async def send_one(client: httpx.AsyncClient, contact: dict) -> bool:
+        try:
+            response = await client.post(
+                endpoint,
+                data={"To": contact["phone"], "From": settings.TWILIO_FROM_NUMBER, "Body": message},
+                auth=(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN),
+            )
+            response.raise_for_status()
+            return True
+        except httpx.HTTPError:
+            logger.warning("SOS SMS request failed for a trusted contact")
+            return False
+
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        results = await asyncio.gather(*(send_one(client, contact) for contact in contacts))
+
+    sent = sum(results)
+    notification_status = "accepted" if sent == len(contacts) else "partial" if sent else "failed"
+    return {"status": notification_status, "sent": sent, "total": len(contacts)}
 
 
 def _serialize(doc: dict) -> AlertOut:
@@ -37,6 +76,23 @@ async def create_alert(payload: AlertCreate, current_user: dict = Depends(get_cu
     doc["resolved_at"] = None
     result = await db.alerts.insert_one(doc)
     doc["_id"] = result.inserted_id
+
+    if payload.source == "manual_sos":
+        contacts = []
+        try:
+            contacts = [contact async for contact in db.contacts.find({"user_id": current_user["_id"]}).sort("priority", 1)]
+            doc["metadata"]["sms_notification"] = await _send_sos_sms(
+                contacts,
+                current_user.get("full_name", "A user"),
+                payload.location.model_dump() if payload.location else None,
+            )
+        except Exception:
+            logger.exception("Could not process SMS notifications for SOS alert")
+            doc["metadata"]["sms_notification"] = {"status": "failed", "sent": 0, "total": len(contacts)}
+        try:
+            await db.alerts.update_one({"_id": result.inserted_id}, {"$set": {"metadata": doc["metadata"]}})
+        except Exception:
+            logger.exception("Could not persist SOS SMS notification status")
 
     alert_out = _serialize(doc)
     await manager.send_to_user(current_user["_id"], {"type": "new_alert", "alert": alert_out.model_dump()})

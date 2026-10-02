@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     # Redis (rate limiting / caching)
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # Optional SMS delivery for manual SOS alerts
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
+
     # CORS
     CORS_ORIGINS: str = (
         "https://ai-guardian-women-safety.vercel.app,"
